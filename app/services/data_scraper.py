@@ -15,63 +15,34 @@ class DataScraper:
             response.raise_for_status()
             soup = BeautifulSoup(response.content, 'html.parser')
 
-            # Find all tables with class 'wikitable'
+            # Find all tables with class wikitable (ignore sortable)
             tables = soup.find_all('table', class_='wikitable')
             if not tables:
-                raise Exception("No wikitable found on the page")
+                raise ValueError("No wikitable found on the page")
 
-            # Define expected keywords for flexible matching in headers
-            expected_keywords = {
-                'rank': None,
-                'peak': None,
-                'title': None,
-                'film': None,
-                'gross': None,
-                'worldwide gross': None,
-                'year': None,
-            }
-
+            expected_cols = {'Rank', 'Peak', 'Title', 'Worldwide gross', 'Year'}
             for table in tables:
-                headers_raw = [th.get_text(strip=True) for th in table.find_all('th')]
-                headers = [header.lower() for header in headers_raw]
-
-                # Map to store found columns keyword -> index
-                found_cols = {}
-
-                # Search headers for each expected keyword
-                for kw in expected_keywords:
-                    for idx, header in enumerate(headers):
-                        if kw in header:
-                            found_cols[kw] = idx
-                            break  # only first match per keyword
-
-                # Require: rank, peak, (title or film), gross/worldwide gross, year
-                if ('rank' in found_cols and 
-                    'peak' in found_cols and
-                    ('title' in found_cols or 'film' in found_cols) and
-                    ('gross' in found_cols or 'worldwide gross' in found_cols) and
-                    'year' in found_cols):
-
+                headers = [th.get_text(strip=True) for th in table.find_all('th')]
+                # Check if table has all expected columns
+                if expected_cols.issubset(set(headers)):
                     rows = []
-                    header_len = len(headers_raw)
                     for tr in table.find_all('tr')[1:]:  # skip header row
                         cells = tr.find_all(['td', 'th'])
-                        if len(cells) != header_len:
+                        if len(cells) != len(headers):
                             continue
                         row = [cell.get_text(strip=True) for cell in cells]
                         rows.append(row)
 
-                    df = pd.DataFrame(rows, columns=headers_raw)
-                    if not df.empty:
-                        return self.clean_dataframe(df)
+                    df = pd.DataFrame(rows, columns=headers)
+                    return self.clean_dataframe(df)
 
-            raise Exception("No suitable table found containing expected columns")
+            raise ValueError("No suitable table found with expected columns")
 
         except Exception as e:
             raise Exception(f"Error scraping Wikipedia table: {str(e)}")
 
     def clean_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
-        # Remove footnotes like [1], [a], etc. and strip whitespace
+        # Remove footnote references like [1], [a], etc. and strip extra whitespace
         for col in df.columns:
             if df[col].dtype == 'object':
                 df[col] = df[col].str.replace(r'\[.*?\]', '', regex=True)
